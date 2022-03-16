@@ -319,16 +319,14 @@ def main():
 
             for i in range(len(int_status)):
                 delta = 'ATTENTION'
-                print dst_traffic_final_in[i], dst_traffic_init_in[i], destination[i].value
                 if ((float(dst_traffic_final_in[i]) - float(dst_traffic_init_in[i])) > 5) and ((float(dst_traffic_final_out[i]) - float(dst_traffic_init_out[i])) > 5):
                     delta = 'OK'
-                if len(source_int) >= i:
-                    write_final_optical_values(optical, 'No source int', 'No source int',
-                                               'No source int', destination[i].value,
-                                               int_status[i], int_light[i], delta, i)
+                if i > len(source_status) - 1:
+                    write_final_optical_values(optical, 'No source int', 'No source int', 'No source int',
+                                               destination[i].value, int_status[i], int_light[i], delta, i)
                 else:
-                    write_final_optical_values(optical, source_int[i].value, source_status[i].value, source_light[i].value, destination[i].value,
-                                           int_status[i], int_light[i], delta, i)
+                    write_final_optical_values(optical, source_int[i].value, source_status[i].value, source_light[i].value,
+                                               destination[i].value, int_status[i], int_light[i], delta, i)
 
             vprn_count = 0
             l2_count = 0
