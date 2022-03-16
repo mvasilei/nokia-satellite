@@ -145,13 +145,18 @@ def get_int_values(interfaces, host, channel):
         if interface.value != '':
             print('Collecting information for interface ' + interface.value)
             output = execute_command('show port ' + interface.value + ' | match "Oper State"\n', channel, host)
-            m = oper_status.search(output.split('\n',3)[1])
-            status.append(m.group())
+            if not 'MINOR' in output:
+                m = oper_status.search(output.split('\n',3)[1])
+                status.append(m.group())
 
-            output = execute_command('show port ' + interface.value + ' optical | match "Rx Optical"\n', channel, host)
-            m = rx_light.search(output.split('\n',3)[1])
-            light.append(m.group())
+                output = execute_command('show port ' + interface.value + ' optical | match "Rx Optical"\n', channel, host)
+                m = rx_light.search(output.split('\n',3)[1])
+                light.append(m.group())
+            else:
+                status.append('cli error')
+                light.append('cli error')
             count += 1
+
     return status, light,
 
 def get_service_values(interfaces, host, channel):
@@ -200,8 +205,12 @@ def get_int_traffic(interfaces, host, channel):
         if interface.value != '':
             output = execute_command('show port ' + interface.value + ' statistics | match ' + interface.value + '\n',
                                      channel, host)
-            traffic_in.append(output.split('\n', 3)[1].split()[1])
-            traffic_out.append(output.split('\n', 3)[1].split()[3])
+            if 'MINOR' not in output.split('\n', 3)[1]:
+                traffic_in.append(output.split('\n', 3)[1].split()[1])
+                traffic_out.append(output.split('\n', 3)[1].split()[3])
+            else:
+                traffic_in.append('0')
+                traffic_out.append('0')
 
     return traffic_in, traffic_out
 
@@ -241,6 +250,9 @@ def main():
             print('The file you specified doesn''t exist')
             exit()
 
+        # Read source interfaces from Nokia xls sheet optical, connect on device and collect interface information
+        # status, rx light level. Then collect relevant service details for the interfaces that migrate.
+        # Then write the results in an xls file with the name of the host we migrate insterfaces.
         source = read_from_mirgation_book(options.file, 0)
         if len(source) > 0:
             book, optical, vprn, l2 = open_xls_for_write(options.device.upper() + '.xlsx')
@@ -265,6 +277,15 @@ def main():
             print('\nResults written in ' + options.device.upper() + '.xlsx')
             print('Please do NOT delete this file until after your run the post checks')
     elif options.post:
+        if not os.path.exists(options.file):
+            print('The file you specified doesn''t exist')
+            exit()
+
+        # Read destination interfaces from Nokia xls sheet optical, connect on device and collect interface information
+        # status, rx light level. Then collect relevant service details for the interfaces that migrate as well as
+        # values for in/out packets with an interval of 60 seconds.
+        # Then read the results in xls file which was generated in prechecks. Then finally read the results in a xls
+        # with the name of the host_POST_MIGRATION.xlsx
         destination = read_from_mirgation_book(options.file, 1) #CHANGE 0 to 1 when finish
         if len(destination) > 0:
             book, optical, vprn, l2 = open_xls_for_write(options.device.upper() + '_POST_MIGRATION.xlsx')
@@ -298,9 +319,15 @@ def main():
 
             for i in range(len(int_status)):
                 delta = 'ATTENTION'
+                print dst_traffic_final_in[i], dst_traffic_init_in[i], destination[i].value
                 if ((float(dst_traffic_final_in[i]) - float(dst_traffic_init_in[i])) > 5) and ((float(dst_traffic_final_out[i]) - float(dst_traffic_init_out[i])) > 5):
                     delta = 'OK'
-                write_final_optical_values(optical, source_int[i].value, source_status[i].value, source_light[i].value, destination[i].value,
+                if len(source_int) >= i:
+                    write_final_optical_values(optical, 'No source int', 'No source int',
+                                               'No source int', destination[i].value,
+                                               int_status[i], int_light[i], delta, i)
+                else:
+                    write_final_optical_values(optical, source_int[i].value, source_status[i].value, source_light[i].value, destination[i].value,
                                            int_status[i], int_light[i], delta, i)
 
             vprn_count = 0
