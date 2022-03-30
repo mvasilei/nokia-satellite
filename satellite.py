@@ -75,9 +75,10 @@ def get_user_password():
 
 def read_from_mirgation_book(filename, column):
     book = xlrd.open_workbook(filename)
-    sheet = book.sheet_by_name('optical')
+    optical = book.sheet_by_name('optical')
+    electrical = book.sheet_by_name('electrical')
 
-    return sheet.col_slice(column,1)
+    return optical.col_slice(column,1), electrical.col_slice(column,1)
 
 def read_from_intemediate_book(filename, index):
     book = xlrd.open_workbook(filename)
@@ -88,9 +89,10 @@ def read_from_intemediate_book(filename, index):
 def open_xls_for_write(filname):
     book = xlsxwriter.Workbook(filname)
     optical = book.add_worksheet('Optical')
+    electrical = book.add_worksheet('Electrical')
     vprn = book.add_worksheet('VPRN')
     l2 = book.add_worksheet('L2')
-    return book, optical, vprn, l2
+    return book, optical, electrical, vprn, l2
 
 def close_xls_book(book):
     book.close()
@@ -113,7 +115,10 @@ def write_final_optical_values(worksheet, srcif, srcstatus, srclight, dstif, dst
     worksheet.write(row, 6,'=IF('+srccell+'='+dstcell+',"OK","FAILED")')
     srccell = xlsxwriter.utility.xl_rowcol_to_cell(row, 2)
     dstcell = xlsxwriter.utility.xl_rowcol_to_cell(row, 5)
-    worksheet.write(row, 7,'=IF(AND(VALUE('+srccell+')-2<=VALUE('+dstcell+'),VALUE('+srccell+')+2>=VALUE('+dstcell+')),"OK","FAILED")')
+    if srclight == 'N/A' and dstlight == 'N/A':
+        worksheet.write(row, 7, 'N/A')
+    else:
+        worksheet.write(row, 7,'=IF(AND(VALUE('+srccell+')-2<=VALUE('+dstcell+'),VALUE('+srccell+')+2>=VALUE('+dstcell+')),"OK","FAILED")')
     worksheet.write(row, 8, delta)
 
 
@@ -143,15 +148,19 @@ def get_int_values(interfaces, host, channel):
 
     for interface in interfaces:
         if interface.value != '':
-            print('Collecting information for interface ' + interface.value)
+            print('\nCollecting information for interface ' + interface.value)
             output = execute_command('show port ' + interface.value + ' | match "Oper State"\n', channel, host)
             if not 'MINOR' in output:
                 m = oper_status.search(output.split('\n',3)[1])
                 status.append(m.group())
 
                 output = execute_command('show port ' + interface.value + ' optical | match "Rx Optical"\n', channel, host)
-                m = rx_light.search(output.split('\n',3)[1])
-                light.append(m.group())
+
+                if len(output.split('\n')) > 2:
+                    m = rx_light.search(output.split('\n',3)[1])
+                    light.append(m.group())
+                else:
+                    light.append('N/A')
             else:
                 status.append('cli error')
                 light.append('cli error')
@@ -167,7 +176,7 @@ def get_service_values(interfaces, host, channel):
     svc_type = []
     service_type = re.compile(r'(?<=:).[A-Z,a-z]{1,5}')
 
-    print('Collecting SAP details')
+    print('\nCollecting SAP details')
     saps = execute_command('show service sap-using\n', channel, host)
     sap_lines = saps.split('\n')
     count = 0
@@ -205,7 +214,7 @@ def get_int_traffic(interfaces, host, channel):
         if interface.value != '':
             output = execute_command('show port ' + interface.value + ' statistics | match ' + interface.value + '\n',
                                      channel, host)
-            if 'MINOR' not in output.split('\n', 3)[1]:
+            if 'MINOR' not in output.split('\n', 3)[1] and len(output.split('\n', 3)) > 2:
                 traffic_in.append(output.split('\n', 3)[1].split()[1])
                 traffic_out.append(output.split('\n', 3)[1].split()[3])
             else:
@@ -247,25 +256,46 @@ def main():
 
     if options.check:
         if not os.path.exists(options.file):
-            print('The file you specified doesn''t exist')
+            print('The file you specified doesn''t exist... aborting')
             exit()
 
-        # Read source interfaces from Nokia xls sheet optical, connect on device and collect interface information
+        # Read source interfaces from Nokia xls sheet optical and electrical, connect on device and collect interface information
         # status, rx light level. Then collect relevant service details for the interfaces that migrate.
         # Then write the results in an xls file with the name of the host we migrate insterfaces.
-        source = read_from_mirgation_book(options.file, 0)
-        if len(source) > 0:
-            book, optical, vprn, l2 = open_xls_for_write(options.device.upper() + '.xlsx')
+        optical_sheet, electrical_sheet = read_from_mirgation_book(options.file, 0)
+        if len(optical_sheet) > 0 or len(electrical_sheet) > 0:
+            book, optical, electrical, vprn, l2 = open_xls_for_write(options.device.upper() + '.xlsx')
             user, password = get_user_password()
-            channel, client = connection_establishment(user, password, options.device)
-            int_status, int_light = get_int_values(source, options.device, channel)
-            svc_type, svc_id, sap, arp, svc_status = get_service_values(source, options.device, channel)
-            connection_teardown(client)
+            channel, client = connection_establishment(user, password, options.device.upper())
+
+        if len(optical_sheet) > 0:
+            int_status, int_light = get_int_values(optical_sheet, options.device.upper(), channel)
+            svc_type, svc_id, sap, arp, svc_status = get_service_values(optical_sheet, options.device.upper(), channel)
+
+            if len(electrical_sheet) > 0:
+                electrical_int_status, electrical_int_light = get_int_values(electrical_sheet, options.device.upper(), channel)
+
+                electrical_svc_type, electrical_svc_id, electrical_sap, electrical_arp, electrical_svc_status = \
+                    get_service_values(electrical_sheet, options.device.upper(), channel)
+
+                for i in range(len(electrical_int_status)):
+                    write_source(electrical, electrical_sheet[i].value, electrical_int_status[i],
+                                 electrical_int_light[i], i)
+
+                svc_type.extend(electrical_svc_type)
+                svc_id.extend(electrical_svc_id)
+                sap.extend(electrical_sap)
+                arp.extend(electrical_arp)
+                svc_status.extend(electrical_svc_status)
+
             for i in range(len(int_status)):
-                write_source(optical, source[i].value, int_status[i], int_light[i], i)
+                write_source(optical, optical_sheet[i].value, int_status[i], int_light[i], i)
+
+            connection_teardown(client)
 
             vprn_count = 0
             l2_count = 0
+
             for i in range(len(svc_type)):
                 if "VPRN" in svc_type[i]:
                     write_source(vprn, svc_id[i], sap[i], arp[vprn_count], vprn_count)
@@ -276,9 +306,38 @@ def main():
             close_xls_book(book)
             print('\nResults written in ' + options.device.upper() + '.xlsx')
             print('Please do NOT delete this file until after your run the post checks')
+        elif len(electrical_sheet) > 0:
+            electrical_int_status, electrical_int_light = get_int_values(electrical_sheet, options.device.upper(),
+                                                                         channel)
+
+            electrical_svc_type, electrical_svc_id, electrical_sap, electrical_arp, electrical_svc_status = \
+                get_service_values(electrical_sheet, options.device.upper(), channel)
+
+            for i in range(len(electrical_int_status)):
+                write_source(electrical, electrical_sheet[i].value, electrical_int_status[i],
+                             electrical_int_light[i], i)
+
+            connection_teardown(client)
+            vprn_count = 0
+            l2_count = 0
+
+            for i in range(len(electrical_svc_type)):
+                if "VPRN" in electrical_svc_type[i]:
+                    write_source(vprn, electrical_svc_id[i], electrical_sap[i], electrical_arp[vprn_count], vprn_count)
+                    vprn_count += 1
+                else:
+                    write_source(l2, electrical_svc_id[i], electrical_sap[i], electrical_svc_status[l2_count], l2_count)
+                    l2_count += 1
+            close_xls_book(book)
+            print('\nResults written in ' + options.device.upper() + '.xlsx')
+            print('Please do NOT delete this file until after your run the post checks')
+
     elif options.post:
         if not os.path.exists(options.file):
-            print('The file you specified doesn''t exist')
+            print('The file you specified doesn''t exist... aborting')
+            exit()
+        if not os.path.exists(options.device.upper() + '_POST_MIGRATION.xlsx'):
+            print('The pre-check file is missing... aborting')
             exit()
 
         # Read destination interfaces from Nokia xls sheet optical, connect on device and collect interface information
@@ -286,62 +345,179 @@ def main():
         # values for in/out packets with an interval of 60 seconds.
         # Then read the results in xls file which was generated in prechecks. Then finally read the results in a xls
         # with the name of the host_POST_MIGRATION.xlsx
-        destination = read_from_mirgation_book(options.file, 1) #CHANGE 0 to 1 when finish
-        if len(destination) > 0:
-            book, optical, vprn, l2 = open_xls_for_write(options.device.upper() + '_POST_MIGRATION.xlsx')
+        optical_sheet, electrical_sheet = read_from_mirgation_book(options.file, 1)  # CHANGE 0 to 1 when finish
+        if len(optical_sheet) > 0 or len(electrical_sheet) > 0:
+            book, optical, electrical, vprn, l2 = open_xls_for_write(options.device.upper() + '_POST_MIGRATION.xlsx')
             user, password = get_user_password()
             channel, client = connection_establishment(user, password, options.device)
-            int_status, int_light = get_int_values(destination, options.device, channel)
-            dst_svc_type, dst_svc_id, dst_sap, dst_arp, dst_svc_status = get_service_values(destination, options.device, channel)
+            src_vprn_id, src_vprn_sap, src_vprn_arp = read_from_intemediate_book(options.device.upper() + '.xlsx', 2)
+            src_l2_id, src_l2_sap, src_l2_status = read_from_intemediate_book(options.device.upper() + '.xlsx', 3)
 
-            dst_traffic_init_in, dst_traffic_init_out = get_int_traffic(destination, options.device, channel)
-            print ('\nPausing for 60 seconds to calculate L2 svc traffic delta...')
-            dst_traffic_final_in, dst_traffic_final_out = get_int_traffic(destination, options.device, channel)
-
-            connection_teardown(client)
-            source_int, source_status, source_light = read_from_intemediate_book(options.device.upper() + '.xlsx',0)
-            src_vprn_id, src_vprn_sap, src_vprn_arp = read_from_intemediate_book(options.device.upper() + '.xlsx', 1)
-            src_l2_id, src_l2_sap, src_l2_status = read_from_intemediate_book(options.device.upper() + '.xlsx', 2)
             column = 0
-            for value in ['Src i/f','Src i/f status', 'Src Rx Level', 'Dst i/f', 'Dst i/f status', 'Dst Rx Level', 'I/f status check', 'Rx Level Check', 'Traffic passing']:
+            for value in ['Src i/f', 'Src i/f status', 'Src Rx Level', 'Dst i/f', 'Dst i/f status', 'Dst Rx Level',
+                          'I/f status check', 'Rx Level Check', 'Traffic passing']:
                 write_final_header(optical, value, column)
                 column += 1
 
             column = 0
-            for value in ['Src Svc ID','Src SAP', 'Src ARP', 'Dst Svc ID', 'Dst SAP', 'Dst ARP', 'ARP check']:
+            for value in ['Src i/f', 'Src i/f status', 'Src Rx Level', 'Dst i/f', 'Dst i/f status', 'Dst Rx Level',
+                          'I/f status check', 'Rx Level Check', 'Traffic passing']:
+                write_final_header(electrical, value, column)
+                column += 1
+
+            column = 0
+            for value in ['Src Svc ID', 'Src SAP', 'Src ARP', 'Dst Svc ID', 'Dst SAP', 'Dst ARP', 'ARP check']:
                 write_final_header(vprn, value, column)
                 column += 1
 
             column = 0
-            for value in ['Src Svc ID','Src SAP', 'Src Svc status', 'Dst Svc ID', 'Dst SAP', 'Dst Svc status', 'Svc Status']:
+            for value in ['Src Svc ID', 'Src SAP', 'Src Svc status', 'Dst Svc ID', 'Dst SAP', 'Dst Svc status',
+                          'Svc Status']:
                 write_final_header(l2, value, column)
                 column += 1
 
+
+        if len(optical_sheet) > 0:
+            int_status, int_light = get_int_values(optical_sheet, options.device.upper(), channel)
+            dst_svc_type, dst_svc_id, dst_sap, dst_arp, dst_svc_status = get_service_values(optical_sheet, options.device.upper(),
+                                                                                            channel)
+
+            dst_traffic_init_in, dst_traffic_init_out = get_int_traffic(optical_sheet, options.device.upper(), channel)
+            print('\nPausing for 60 seconds to calculate traffic delta...')
+            time.sleep(60)
+            dst_traffic_final_in, dst_traffic_final_out = get_int_traffic(optical_sheet, options.device.upper(), channel)
+
+            source_int, source_status, source_light = read_from_intemediate_book(options.device.upper() + '.xlsx', 0)
+
+            if len(electrical_sheet) > 0:
+                el_source_int, el_source_status, el_source_light = read_from_intemediate_book(options.device.upper() + '.xlsx', 1)
+                el_int_status, el_int_light = get_int_values(electrical_sheet, options.device.upper(), channel)
+                el_dst_svc_type, el_dst_svc_id, el_dst_sap, el_dst_arp, el_dst_svc_status = get_service_values(electrical_sheet,
+                                                                                                options.device.upper(),
+                                                                                                channel)
+                dst_svc_type.extend(el_dst_svc_type)
+                dst_svc_id.extend(el_dst_svc_id)
+                dst_sap.extend(el_dst_sap)
+                dst_arp.extend(el_dst_arp)
+                dst_svc_status.extend(el_dst_svc_status)
+
+                el_dst_traffic_init_in, el_dst_traffic_init_out = get_int_traffic(electrical_sheet, options.device.upper(), channel)
+                print('\nPausing for 60 seconds to calculate traffic delta...')
+                time.sleep(60)
+                el_dst_traffic_final_in, el_dst_traffic_final_out = get_int_traffic(electrical_sheet, options.device.upper(), channel)
+
+                for i in range(len(el_int_status)):
+                    delta = 'ATTENTION'
+                    if ('down' in el_int_status[i]):
+                        delta = 'N/A'
+                    elif ((float(el_dst_traffic_final_in[i]) - float(el_dst_traffic_init_in[i])) > 5) and (
+                            (float(el_dst_traffic_final_out[i]) - float(el_dst_traffic_init_out[i])) > 5):
+                        delta = 'OK'
+                    if i > len(el_source_status) - 1:
+                        write_final_optical_values(electrical, 'No source int', 'No source int', 'No source int',
+                                                   electrical_sheet[i].value, el_int_status[i], el_int_light[i], delta, i)
+                    else:
+                        write_final_optical_values(electrical, el_source_int[i].value, el_source_status[i].value,
+                                                   el_source_light[i].value,
+                                                   electrical_sheet[i].value, el_int_status[i], el_int_light[i], delta, i)
+
+            connection_teardown(client)
+
             for i in range(len(int_status)):
                 delta = 'ATTENTION'
-                if ((float(dst_traffic_final_in[i]) - float(dst_traffic_init_in[i])) > 5) and ((float(dst_traffic_final_out[i]) - float(dst_traffic_init_out[i])) > 5):
+                if ('down' in int_status[i]):
+                    delta = 'N/A'
+                elif ((float(dst_traffic_final_in[i]) - float(dst_traffic_init_in[i])) > 5) and (
+                        (float(dst_traffic_final_out[i]) - float(dst_traffic_init_out[i])) > 5):
                     delta = 'OK'
                 if i > len(source_status) - 1:
                     write_final_optical_values(optical, 'No source int', 'No source int', 'No source int',
-                                               destination[i].value, int_status[i], int_light[i], delta, i)
+                                               optical_sheet[i].value, int_status[i], int_light[i], delta, i)
                 else:
-                    write_final_optical_values(optical, source_int[i].value, source_status[i].value, source_light[i].value,
-                                               destination[i].value, int_status[i], int_light[i], delta, i)
-
+                    write_final_optical_values(optical, source_int[i].value, source_status[i].value,
+                                               source_light[i].value,
+                                               optical_sheet[i].value, int_status[i], int_light[i], delta, i)
             vprn_count = 0
             l2_count = 0
             for i in range(len(dst_svc_type)):
                 if "VPRN" in dst_svc_type[i]:
-                    write_final_service_values(vprn, src_vprn_id[vprn_count].value, src_vprn_sap[vprn_count].value, src_vprn_arp[vprn_count].value,
-                                                dst_svc_id[i], dst_sap[i], dst_arp[vprn_count], vprn_count)
+                    write_final_service_values(vprn, src_vprn_id[vprn_count].value, src_vprn_sap[vprn_count].value,
+                                               src_vprn_arp[vprn_count].value,
+                                               dst_svc_id[i], dst_sap[i], dst_arp[vprn_count], vprn_count)
                     vprn_count += 1
                 else:
-                    write_final_service_values(l2, src_l2_id[l2_count].value, src_l2_sap[l2_count].value, src_l2_status[l2_count].value,
+                    write_final_service_values(l2, src_l2_id[l2_count].value, src_l2_sap[l2_count].value,
+                                               src_l2_status[l2_count].value,
                                                dst_svc_id[i], dst_sap[i], dst_svc_status[l2_count], l2_count)
                     l2_count += 1
+
+            close_xls_book(book)
+            print('Results written in ' + options.device.upper() + '_POST_MIGRATION.xlsx')
+        elif len(electrical_sheet) > 0:
+            el_source_int, el_source_status, el_source_light = read_from_intemediate_book(
+                options.device.upper() + '.xlsx', 1)
+            el_int_status, el_int_light = get_int_values(electrical_sheet, options.device.upper(), channel)
+            el_dst_svc_type, el_dst_svc_id, el_dst_sap, el_dst_arp, el_dst_svc_status = get_service_values(
+                electrical_sheet,
+                options.device.upper(),
+                channel)
+
+            el_dst_traffic_init_in, el_dst_traffic_init_out = get_int_traffic(electrical_sheet, options.device.upper(),
+                                                                              channel)
+            print('\nPausing for 60 seconds to calculate traffic delta...')
+            time.sleep(60)
+            el_dst_traffic_final_in, el_dst_traffic_final_out = get_int_traffic(electrical_sheet, options.device.upper(),
+                                                                                channel)
+
+            for i in range(len(el_int_status)):
+                delta = 'ATTENTION'
+                if ('down' in el_int_status[i]):
+                    delta = 'N/A'
+                elif ((float(el_dst_traffic_final_in[i]) - float(el_dst_traffic_init_in[i])) > 5) and (
+                        (float(el_dst_traffic_final_out[i]) - float(el_dst_traffic_init_out[i])) > 5):
+                    delta = 'OK'
+                if i > len(el_source_status) - 1:
+                    write_final_optical_values(electrical, 'No source int', 'No source int', 'No source int',
+                                               electrical_sheet[i].value, el_int_status[i], el_int_light[i], delta, i)
+                else:
+                    write_final_optical_values(electrical, el_source_int[i].value, el_source_status[i].value,
+                                               el_source_light[i].value,
+                                               electrical_sheet[i].value, el_int_status[i], el_int_light[i], delta, i)
+
+            connection_teardown(client)
+
+            for i in range(len(el_int_status)):
+                delta = 'ATTENTION'
+                if ('down' in el_int_status[i]):
+                    delta = 'N/A'
+                elif ((float(el_dst_traffic_final_in[i]) - float(el_dst_traffic_init_in[i])) > 5) and (
+                        (float(el_dst_traffic_final_out[i]) - float(el_dst_traffic_init_out[i])) > 5):
+                    delta = 'OK'
+                if i > len(el_source_status) - 1:
+                    write_final_optical_values(electrical, 'No source int', 'No source int', 'No source int',
+                                               electrical_sheet[i].value, el_int_status[i], el_int_light[i], delta, i)
+                else:
+                    write_final_optical_values(electrical, el_source_int[i].value, el_source_status[i].value,
+                                               el_source_light[i].value,
+                                               electrical_sheet[i].value, el_int_status[i], el_int_light[i], delta, i)
+            vprn_count = 0
+            l2_count = 0
+            for i in range(len(el_dst_svc_type)):
+                if "VPRN" in el_dst_svc_type[i]:
+                    write_final_service_values(vprn, src_vprn_id[vprn_count].value, src_vprn_sap[vprn_count].value,
+                                               src_vprn_arp[vprn_count].value,
+                                               el_dst_svc_id[i], el_dst_sap[i], el_dst_arp[vprn_count], vprn_count)
+                    vprn_count += 1
+                else:
+                    write_final_service_values(l2, src_l2_id[l2_count].value, src_l2_sap[l2_count].value,
+                                               src_l2_status[l2_count].value,
+                                               el_dst_svc_id[i], el_dst_sap[i], el_dst_svc_status[l2_count], l2_count)
+                    l2_count += 1
+
             close_xls_book(book)
             print('Results written in ' + options.device.upper() + '_POST_MIGRATION.xlsx')
 
+
 if __name__ == '__main__':
-    signal.signal(signal.SIGINT, signal_handler)  #catch ctrl-c and call handler to terminate the script
+    signal.signal(signal.SIGINT, signal_handler)  # catch ctrl-c and call handler to terminate the script
     main()
