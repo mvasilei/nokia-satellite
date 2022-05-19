@@ -37,10 +37,10 @@ def execute_command(command, channel, host):
     channel.send(command)
     while True:
         if channel.recv_ready():
-            data = channel.recv(1000)
+            data = channel.recv(1024)
             cbuffer.append(data)
 
-        time.sleep(0.02)
+        time.sleep(0.01)
         data_no_trails = data.strip()
 
         if len(data_no_trails) > 0: #and
