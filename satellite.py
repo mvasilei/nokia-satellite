@@ -1,6 +1,5 @@
 #! /usr/bin/env python2.6
 import sys, os, signal, re, getpass, time, xlrd, xlsxwriter
-from optparse import OptionParser
 from zipfile import ZipFile
 from optparse import OptionParser
 sys.path.insert(0,(os.path.expanduser('~')+'/.local/lib/python2.6/site-packages/'))
@@ -216,7 +215,7 @@ def get_int_traffic(interfaces, host, channel):
                                      channel, host)
             if 'MINOR' not in output.split('\n', 3)[1] and len(output.split('\n', 3)) > 2:
                 traffic_in.append(output.split('\n', 3)[1].split()[1])
-                traffic_out.append(output.split('\n', 3)[1].split()[3])
+                traffic_out.append(output.split('\n', 3)[1].split()[2])
             else:
                 traffic_in.append('0')
                 traffic_out.append('0')
@@ -261,7 +260,7 @@ def main():
 
         # Read source interfaces from Nokia xls sheet optical and electrical, connect on device and collect interface information
         # status, rx light level. Then collect relevant service details for the interfaces that migrate.
-        # Then write the results in an xls file with the name of the host we migrate insterfaces.
+        # Then write the results in an xls file with the name of the host we migrate interfaces.
         optical_sheet, electrical_sheet = read_from_mirgation_book(options.file, 0)
         if len(optical_sheet) > 0 or len(electrical_sheet) > 0:
             book, optical, electrical, vprn, l2 = open_xls_for_write(options.device.upper() + '.xlsx')
@@ -336,7 +335,7 @@ def main():
         if not os.path.exists(options.file):
             print('The file you specified doesn''t exist... aborting')
             exit()
-        if not os.path.exists(options.device.upper() + '_POST_MIGRATION.xlsx'):
+        if not os.path.exists(options.device.upper() + '.xlsx'):
             print('The pre-check file is missing... aborting')
             exit()
 
