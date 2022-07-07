@@ -100,7 +100,6 @@ def fix_slope_mtu(device):
 
 def queuing(sap):
     no_queuing = re.sub(r'shared\-queuing', '', sap.group())
-    print no_queuing
     return no_queuing
 
 def fix_share_queueing(device):
@@ -146,6 +145,37 @@ def remove_service_name(device):
 
             # remove service name references from the config
             contents = re.sub(r'.*service-name.*', '', contents, )
+
+        with open('temp_' + device + '.cfg', 'w') as df:
+            df.write(contents)
+    except IOError as e:
+        print('Operation failed:' + e.strerror)
+        exit()
+
+def add_soft_repo(device):
+    config = '        snmp\n\
+            streaming\n\
+                no shutdown\n\
+            exit\n\
+            packet-size 9216\n\
+        exit\n\
+        software-repository "7210-SAS-Sx-TiMOS-20.9.R3" create\n\
+            description "7210-SAS-Sx-2009R3-Images"\n\
+            primary-location "cf3:/7210-SAS-Sx-TiMOS-20.9.R3"\n\
+        exit'
+
+    try:
+        with open('temp_' + device + '.cfg', 'r+') as sf:
+            contents = sf.read()
+
+        regex = re.compile(r'(^\s{8}snmp\n[\s\S]+?^\s{8}exit)', re.MULTILINE)
+        contents = re.sub(regex, config, contents)
+
+        config = '        lldp\n\
+            no shutdown\n\
+        exit'
+        regex = re.compile(r'(^\s{8}lldp\n[\s\S]+?^\s{8}exit)', re.MULTILINE)
+        contents = re.sub(regex, config, contents)
 
         with open('temp_' + device + '.cfg', 'w') as df:
             df.write(contents)
@@ -282,12 +312,13 @@ def esat_init(device, master):
                 description "Ethernet Satellite"\n\
                 mac-address ' + mac +'\n\
                 sat-type "es48-1gb-sfp"\n\
+                software-repository "7210-SAS-Sx-TiMOS-20.9.R3"\n\
                 no shutdown\n\
             exit\n '
 
     config += '        exit\n\
     exit\n\
-# --------------------------------------------------\n'
+#--------------------------------------------------\n'
 
     try:
         with open('temp_' + device + '.cfg', 'r+') as sf:
@@ -348,6 +379,7 @@ def main():
     mda = replace_mda(optical_src, optical_dst, original_cfg, options.device)
     mda.update(replace_mda(electrical_src, electrical_dst, 'temp_' + options.device + '.cfg', options.device))
     delete_unused_ports(mda, options.device)
+    add_soft_repo(options.device)
     fix_bfd(options.device)
     fix_slope_mtu(options.device)
     fix_share_queueing(options.device)
@@ -357,6 +389,10 @@ def main():
     esat_init(options.device, options.master)
     esat_synce(options.device, options.master)
     esat_uplinks(options.device, options.master)
+
+    #result = subprocess.call(['scp temp_' + options.device + '.cfg ' + options.device+':cf3:\\' + options.device + '_R20.cfg'],
+    #    stdout=subprocess.PIPE,
+    #    shell=True)
 
 
 if __name__ == '__main__':
