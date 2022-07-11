@@ -14,9 +14,10 @@ def read_from_mirgation_book(filename):
     return optical.col_slice(0), electrical.col_slice(0), \
            optical.col_slice(1), electrical.col_slice(1)
 
-def replace_mda(src, dst, cfg, device):
+def replace_mda(master, src, dst, cfg, device):
     # read device config file and replace the mda interface with the esat equivalent from the migration spreadsheet
-    mda = set()
+    card = set()
+    removed_cards = set()
     not_migrated = 0
 
     sf = open(cfg, 'r')
@@ -29,27 +30,58 @@ def replace_mda(src, dst, cfg, device):
         destination = dst[i].value
         if source != '':
             contents = re.sub(re.escape(source)+r'\b', destination, contents)
-        mda.update(source.split('/', 1)[0])  # return a set with MDAs listed as src interfaces
+        card.update(source.split('/', 1)[0])  # return a set with card listed as src interfaces
 
-    # shutdown the migrated mda
-    for slot in mda:
-        regex = re.compile(r'(?<=\s{4}card\s' + re.escape(str(slot)) + r')[\s\S]+?(?=^\s{4}exit)',
-                           re.MULTILINE)
-        contents = re.sub(regex, r'\n        shutdown\n', contents)
+    # shutdown the migrated cards
+    book = xlrd.open_workbook(master)
+    epe = book.sheet_by_name('EPE_SlotReport16072021')
+
+    card_config = '    card-type imm-2pac-fp3\n\
+            mda 1\n\
+                mda-type p10-10g-sfp\n\
+                no shutdown\n\
+            exit\n\
+            mda 2\n\
+                mda-type p10-10g-sfp\n\
+                no shutdown\n\
+            exit\n\
+            fp 1\n\
+                ingress\n\
+                    mcast-path-management\n\
+                        no shutdown\n\
+                    exit\n\
+                exit\n\
+            exit\n\
+            no shutdown\n'
+
+    for i in range(epe.nrows):
+        if epe.cell_value(i, 1).upper() == device.upper():
+            for slot in card:
+                if epe.cell_value(i, 16) != 'Yes' and int(epe.cell_value(i, 4)) == int(slot) and \
+                        ('Daughter' not in epe.cell_value(i, 5) and 'SFM' not in epe.cell_value(i, 5)):
+                    regex = re.compile(r'(?<=\s{4}card\s' + re.escape(str(slot)) + r')[\s\S]+?(?=^\s{4}exit)',
+                                       re.MULTILINE)
+                    contents = re.sub(regex, r'\n        shutdown\n', contents)
+                    removed_cards.update(slot)
+                elif epe.cell_value(i, 16) == 'Yes' and int(epe.cell_value(i, 4)) == int(slot) and \
+                        '2-PAC FP3 IMM' in epe.cell_value(i, 15):
+                    regex = re.compile(r'(?<=\s{4}card\s' + re.escape(str(slot)) + r')[\s\S]+?(?=^\s{4}exit)',
+                                       re.MULTILINE)
+                    contents = re.sub(regex, card_config, contents)
 
     tmp = open('temp_' + device + '.cfg', 'w+')
     tmp.write(contents)
     tmp.close()
 
-    return mda
+    return removed_cards
 
-def delete_unused_ports(mda, device):
+def delete_unused_ports(card, device):
     try:
         with open('temp_' + device + '.cfg', 'r+') as sf:
             contents = sf.read()
 
-            for slot in mda:
-                # delete ports from config that are of the removed mda and aren't migrated
+            for slot in card:
+                # delete ports from config that are of the removed card and aren't migrated
                 regex = re.compile(r'\s{4}port\s' + re.escape(str(slot)) + r'\/.+\/.+[\s\S]*?^\s{4}exit',
                                    re.MULTILINE)
                 contents = re.sub(regex, '', contents)
@@ -266,6 +298,7 @@ def esat_synce(device, master):
         exit()
 
 def esat_uplinks(device, master):
+    port_config = ''
     book = xlrd.open_workbook(master)
     satellite_uplinks = book.sheet_by_name('Circuit References')
 
@@ -279,15 +312,28 @@ def esat_uplinks(device, master):
             mdaport = str(satellite_uplinks.cell_value(i, 1)).lower()
             esat_ulink = str(satellite_uplinks.cell_value(i, 3)).lower()
             config = config + '            ' + mdaport + ' to ' + esat_ulink + ' create\n'
+            port_config += '    ' + str(satellite_uplinks.cell_value(i, 1)).lower() + '\n\
+        description "vf=4445:dt=bb:bw=10G:ph=10GE:st=act:tl=#VF#' + str(satellite_uplinks.cell_value(i, 4)).lower() + ':di=' + device + '-' + satellite_uplinks.cell_value(i, 2) +'#' + satellite_uplinks.cell_value(i, 3) + '"\n\
+        ethernet\n\
+            dot1x\n\
+                tunneling\n\
+            exit\n\
+            mode hybrid\n\
+            encap-type dot1q\n\
+            ssm\n\
+                no shutdown\n\
+            exit\n\
+        exit\n\
+        no shutdown\n\
+    exit\n'
 
     config = config + '        exit\n\
-    exit\n\
-#--------------------------------------------------\n'
+    exit\n'
 
     try:
         with open('temp_' + device + '.cfg', 'r+') as sf:
             contents = sf.read()
-
+        contents = re.sub(r'(echo "Port Configuration"\n#\-.*\n)', r'\g<1>' + port_config, contents)
         contents = re.sub(r'(echo "System Satellite phase 2 Configuration"\n)', config + r'\g<1>', contents)
         with open('temp_' + device + '.cfg', 'w') as df:
             df.write(contents)
@@ -297,24 +343,25 @@ def esat_uplinks(device, master):
 
 def esat_init(device, master):
     book = xlrd.open_workbook(master)
-    satellite_list = ['1', '2']
-    mac = '8c:83:df:72:a3:9e'
-
-    print 'FIX ME esat_init()'
+    sheet = book.sheet_by_name('PE List')
+    count = 1
 
     config = 'echo "System Satellite phase 1 Configuration"\n\
 #--------------------------------------------------\n\
-    system\n\
-        satellite\n'
-
-    for satellite in satellite_list:
-        config += '            eth-sat ' + satellite + ' create\n\
+        system\n\
+            satellite\n'
+    for i in range(sheet.nrows):
+        if sheet.cell_value(i, 0).upper() == device.upper():
+            for j in range(13,18):
+                if sheet.cell_value(i, j) != '':
+                    config += '            eth-sat ' + str(count) + ' create\n\
                 description "Ethernet Satellite"\n\
-                mac-address ' + mac +'\n\
+                mac-address ' + str(sheet.cell_value(i, j)) +'\n\
                 sat-type "es48-1gb-sfp"\n\
                 software-repository "7210-SAS-Sx-TiMOS-20.9.R3"\n\
                 no shutdown\n\
             exit\n '
+                    count += 1
 
     config += '        exit\n\
     exit\n\
@@ -376,8 +423,8 @@ def main():
     optical_src, electrical_src, optical_dst, electrical_dst = read_from_mirgation_book(options.file)
     original_cfg = '/curr/' + options.device.lower() + '.cfg'
 
-    mda = replace_mda(optical_src, optical_dst, original_cfg, options.device)
-    mda.update(replace_mda(electrical_src, electrical_dst, 'temp_' + options.device + '.cfg', options.device))
+    mda = replace_mda(options.master, optical_src, optical_dst, original_cfg, options.device)
+    mda.update(replace_mda(options.master, electrical_src, electrical_dst, 'temp_' + options.device + '.cfg', options.device))
     delete_unused_ports(mda, options.device)
     add_soft_repo(options.device)
     fix_bfd(options.device)
