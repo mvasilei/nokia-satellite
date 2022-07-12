@@ -35,13 +35,15 @@ def replace_mda(master, src, dst, cfg, device):
     book = xlrd.open_workbook(master)
     epe = book.sheet_by_name('EPE_SlotReport16072021')
 
-    card_config = '    card-type imm-2pac-fp3\n\
+    card_config = '    \ncard-type imm-2pac-fp3\n\
             mda 1\n\
                 mda-type p10-10g-sfp\n\
+                sync-e\n\
                 no shutdown\n\
             exit\n\
             mda 2\n\
                 mda-type p10-10g-sfp\n\
+                sync-e\n\
                 no shutdown\n\
             exit\n\
             fp 1\n\
@@ -73,7 +75,6 @@ def replace_mda(master, src, dst, cfg, device):
                     contents = re.sub(regex, card_config, contents)
                 elif epe.cell_value(i, 16) != 'Yes' and int(epe.cell_value(i, 4)) == int(slot) and \
                         'Daughter' in epe.cell_value(i, 5) and epe.cell_value(i, 17) != '':
-                    print str(epe.cell_value(i, 5).split()[4])
                     removed_cards.add(str(epe.cell_value(i, 5).split()[4]))
 
     tmp = open('temp_' + device + '.cfg', 'w+')
@@ -118,7 +119,7 @@ def fix_bfd(device):
         exit()
 
 def slope(port):
-    regex = re.compile(r'^\s{8}access[\s\S]+?^\s{8}exit', re.MULTILINE)
+    regex = re.compile(r'^\s{8}(access|network)[\s\S]+?^\s{8}exit', re.MULTILINE)
     no_slope = re.sub(regex, '', port.group())
     return no_slope
 
@@ -437,7 +438,6 @@ def main():
 
     mda = replace_mda(options.master, optical_src, optical_dst, original_cfg, options.device)
     mda.update(replace_mda(options.master, electrical_src, electrical_dst, 'temp_' + options.device + '.cfg', options.device))
-    print mda
     delete_unused_ports(mda, options.device)
     add_soft_repo(options.device)
     fix_bfd(options.device)
