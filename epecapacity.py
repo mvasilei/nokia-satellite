@@ -32,7 +32,6 @@ def replace_mda(master, src, dst, cfg, device):
             contents = re.sub(re.escape(source)+r'\b', destination, contents)
         card.update(source.split('/', 1)[0])  # return a set with card listed as src interfaces
 
-    # shutdown the migrated cards
     book = xlrd.open_workbook(master)
     epe = book.sheet_by_name('EPE_SlotReport16072021')
 
@@ -54,11 +53,15 @@ def replace_mda(master, src, dst, cfg, device):
             exit\n\
             no shutdown\n'
 
+    # Go through the lines of master spreadsheet and if the whole card is removed then shut it and add it to the list of
+    # cards for which you can remove reference to port configuration.
+    # If the card is swapped with 2-PAC FP3 IMM then add the configuration to provision the new HW
     for i in range(epe.nrows):
         if epe.cell_value(i, 1).upper() == device.upper():
             for slot in card:
                 if epe.cell_value(i, 16) != 'Yes' and int(epe.cell_value(i, 4)) == int(slot) and \
-                        ('Daughter' not in epe.cell_value(i, 5) and 'SFM' not in epe.cell_value(i, 5)):
+                        ('Daughter' not in epe.cell_value(i, 5) and 'SFM' not in epe.cell_value(i, 5)) and \
+                        epe.cell_value(i, 17) != '':
                     regex = re.compile(r'(?<=\s{4}card\s' + re.escape(str(slot)) + r')[\s\S]+?(?=^\s{4}exit)',
                                        re.MULTILINE)
                     contents = re.sub(regex, r'\n        shutdown\n', contents)
@@ -68,6 +71,10 @@ def replace_mda(master, src, dst, cfg, device):
                     regex = re.compile(r'(?<=\s{4}card\s' + re.escape(str(slot)) + r')[\s\S]+?(?=^\s{4}exit)',
                                        re.MULTILINE)
                     contents = re.sub(regex, card_config, contents)
+                elif epe.cell_value(i, 16) != 'Yes' and int(epe.cell_value(i, 4)) == int(slot) and \
+                        'Daughter' in epe.cell_value(i, 5) and epe.cell_value(i, 17) != '':
+                    print str(epe.cell_value(i, 5).split()[4])
+                    removed_cards.add(str(epe.cell_value(i, 5).split()[4]))
 
     tmp = open('temp_' + device + '.cfg', 'w+')
     tmp.write(contents)
@@ -82,7 +89,11 @@ def delete_unused_ports(card, device):
 
             for slot in card:
                 # delete ports from config that are of the removed card and aren't migrated
-                regex = re.compile(r'\s{4}port\s' + re.escape(str(slot)) + r'\/.+\/.+[\s\S]*?^\s{4}exit',
+                if '/' in slot:
+                    regex = re.compile(r'\s{4}port\s' + re.escape(str(slot)) + r'\/.+[\s\S]*?^\s{4}exit',
+                                       re.MULTILINE)
+                else:
+                    regex = re.compile(r'\s{4}port\s' + re.escape(str(slot)) + r'\/.+\/.+[\s\S]*?^\s{4}exit',
                                    re.MULTILINE)
                 contents = re.sub(regex, '', contents)
 
@@ -313,7 +324,8 @@ def esat_uplinks(device, master):
             esat_ulink = str(satellite_uplinks.cell_value(i, 3)).lower()
             config = config + '            ' + mdaport + ' to ' + esat_ulink + ' create\n'
             port_config += '    ' + str(satellite_uplinks.cell_value(i, 1)).lower() + '\n\
-        description "vf=4445:dt=bb:bw=10G:ph=10GE:st=act:tl=#VF#' + str(satellite_uplinks.cell_value(i, 4)).lower() + ':di=' + device + '-' + satellite_uplinks.cell_value(i, 2) +'#' + satellite_uplinks.cell_value(i, 3) + '"\n\
+        description "vf=4445:dt=bb:bw=10G:ph=10GE:st=act:tl=#VF#' + str(satellite_uplinks.cell_value(i, 4)).lower() + ':di='\
+                           + device + '-' + satellite_uplinks.cell_value(i, 2) +'#' + satellite_uplinks.cell_value(i, 3) + '"\n\
         ethernet\n\
             dot1x\n\
                 tunneling\n\
@@ -348,8 +360,8 @@ def esat_init(device, master):
 
     config = 'echo "System Satellite phase 1 Configuration"\n\
 #--------------------------------------------------\n\
-        system\n\
-            satellite\n'
+    system\n\
+        satellite\n'
     for i in range(sheet.nrows):
         if sheet.cell_value(i, 0).upper() == device.upper():
             for j in range(13,18):
@@ -425,6 +437,7 @@ def main():
 
     mda = replace_mda(options.master, optical_src, optical_dst, original_cfg, options.device)
     mda.update(replace_mda(options.master, electrical_src, electrical_dst, 'temp_' + options.device + '.cfg', options.device))
+    print mda
     delete_unused_ports(mda, options.device)
     add_soft_repo(options.device)
     fix_bfd(options.device)
