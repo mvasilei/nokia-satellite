@@ -18,7 +18,7 @@ def replace_mda(master, src, dst, cfg, device):
     # read device config file and replace the mda interface with the esat equivalent from the migration spreadsheet
     card = set()
     removed_cards = set()
-    not_migrated = 0
+    swapped_cards = set()
 
     sf = open(cfg, 'r')
     contents = sf.read()
@@ -35,25 +35,25 @@ def replace_mda(master, src, dst, cfg, device):
     book = xlrd.open_workbook(master)
     epe = book.sheet_by_name('EPE_SlotReport16072021')
 
-    card_config = '    \ncard-type imm-2pac-fp3\n\
-            mda 1\n\
-                mda-type p10-10g-sfp\n\
-                sync-e\n\
-                no shutdown\n\
-            exit\n\
-            mda 2\n\
-                mda-type p10-10g-sfp\n\
-                sync-e\n\
-                no shutdown\n\
-            exit\n\
-            fp 1\n\
-                ingress\n\
-                    mcast-path-management\n\
-                        no shutdown\n\
-                    exit\n\
+    card_config = '\n        card-type imm-2pac-fp3\n\
+        mda 1\n\
+            mda-type p10-10g-sfp\n\
+            sync-e\n\
+            no shutdown\n\
+        exit\n\
+        mda 2\n\
+            mda-type p10-10g-sfp\n\
+            sync-e\n\
+            no shutdown\n\
+        exit\n\
+        fp 1\n\
+            ingress\n\
+                mcast-path-management\n\
+                    no shutdown\n\
                 exit\n\
             exit\n\
-            no shutdown\n'
+        exit\n\
+        no shutdown\n'
 
     # Go through the lines of master spreadsheet and if the whole card is removed then shut it and add it to the list of
     # cards for which you can remove reference to port configuration.
@@ -76,12 +76,41 @@ def replace_mda(master, src, dst, cfg, device):
                 elif epe.cell_value(i, 16) != 'Yes' and int(epe.cell_value(i, 4)) == int(slot) and \
                         'Daughter' in epe.cell_value(i, 5) and epe.cell_value(i, 17) != '':
                     removed_cards.add(str(epe.cell_value(i, 5).split()[4]))
+                elif epe.cell_value(i, 16) == 'Yes' and int(epe.cell_value(i, 4)) == int(slot) and \
+                        'Daughter' in epe.cell_value(i, 5):
+                    mda = epe.cell_value(i, 5).split()[4]
+                    regex = re.compile(r'\s{4}port\s' + re.escape(str(mda)) + r'\/([1][1-9]|[2-9][0-9])[\s\S]+?\s{4}exit',
+                                       re.MULTILINE)
+                    contents = re.sub(regex, '', contents)
+                    regex = re.compile(r'.*port\s' + re.escape(str(mda)) + r'\/([1][1-9]|[2-9][0-9])+?')
+                    contents = re.sub(regex, '', contents)
 
     tmp = open('temp_' + device + '.cfg', 'w+')
     tmp.write(contents)
     tmp.close()
 
     return removed_cards
+
+def swapped(card, device):
+    try:
+        with open('temp_' + device + '.cfg', 'r+') as sf:
+            contents = sf.read()
+
+            for slot in card:
+                # delete ports from config that are of the removed card and aren't migrated
+                if '/' in slot:
+                    regex = re.compile(r'\s{4}port\s' + re.escape(str(slot)) + r'\/.+[\s\S]*?^\s{4}exit',
+                                       re.MULTILINE)
+                else:
+                    regex = re.compile(r'\s{4}port\s' + re.escape(str(slot)) + r'\/.+\/.+[\s\S]*?^\s{4}exit',
+                                   re.MULTILINE)
+                contents = re.sub(regex, '', contents)
+
+        with open('temp_' + device + '.cfg', 'w') as df:
+            df.write(contents)
+    except IOError as e:
+        print('Operation failed:' + e.strerror)
+        exit()
 
 def delete_unused_ports(card, device):
     try:
@@ -153,6 +182,23 @@ def fix_share_queueing(device):
             # extract port configuration and remove slop from esat interfaces
             regex = re.compile(r'(^\s{12,16}sap\sesat[\s\S]+?\s{12,16}exit)', re.MULTILINE)
             contents = re.sub(regex, queuing, contents)
+
+        with open('temp_' + device + '.cfg', 'w') as df:
+            df.write(contents)
+    except IOError as e:
+        print('Operation failed:' + e.strerror)
+        exit()
+
+def interfaces(interface):
+    return re.sub(r'(.*authentication\-key).*', r'\g<1> juniper', interface.group())
+
+def fix_authentication_key(device):
+    try:
+        with open('temp_' + device + '.cfg', 'r+') as sf:
+            contents = sf.read()
+            # extract port configuration and remove slop from esat interfaces
+            regex = re.compile(r'(?<=interface\s\"port\-esat\-)[\s\S]+?(?=exit)', re.MULTILINE)
+            contents = re.sub(regex, interfaces, contents)
 
         with open('temp_' + device + '.cfg', 'w') as df:
             df.write(contents)
@@ -443,6 +489,7 @@ def main():
     fix_bfd(options.device)
     fix_slope_mtu(options.device)
     fix_share_queueing(options.device)
+    fix_authentication_key(options.device)
     local_user(options.device)
     sfm(options.device, options.master)
     remove_service_name(options.device)
