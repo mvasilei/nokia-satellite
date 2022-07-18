@@ -364,13 +364,16 @@ def esat_uplinks(device, master):
 #--------------------------------------------------\n\
     system\n\
         port-topology\n'
+    try:
+        with open('temp_' + device + '.cfg', 'r+') as sf:
+            contents = sf.read()
 
-    for i in range(satellite_uplinks.nrows):
-        if satellite_uplinks.cell_value(i, 0).upper() == device.upper():
-            mdaport = str(satellite_uplinks.cell_value(i, 1)).lower()
-            esat_ulink = str(satellite_uplinks.cell_value(i, 3)).lower()
-            config = config + '            ' + mdaport + ' to ' + esat_ulink + ' create\n'
-            port_config += '    ' + str(satellite_uplinks.cell_value(i, 1)).lower() + '\n\
+        for i in range(satellite_uplinks.nrows):
+            if satellite_uplinks.cell_value(i, 0).upper() == device.upper():
+                mdaport = str(satellite_uplinks.cell_value(i, 1)).lower()
+                esat_ulink = str(satellite_uplinks.cell_value(i, 3)).lower()
+                config = config + '            ' + mdaport + ' to ' + esat_ulink + ' create\n'
+                port_config += '    ' + str(satellite_uplinks.cell_value(i, 1)).lower() + '\n\
         description "vf=4445:dt=bb:bw=10G:ph=10GE:st=act:tl=#VF#' + str(satellite_uplinks.cell_value(i, 4)).lower() + ':di='\
                            + device + '-' + satellite_uplinks.cell_value(i, 2) +'#' + satellite_uplinks.cell_value(i, 3) + '"\n\
         ethernet\n\
@@ -385,13 +388,13 @@ def esat_uplinks(device, master):
         exit\n\
         no shutdown\n\
     exit\n'
+                # If the mda port that connects to uplink already exist remove the configuration
+                regex = re.compile(r'(^\s{4}' + re.escape(mdaport) + r'\n[\s\S]+?^\s{4}exit)', re.MULTILINE)
+                contents = re.sub(regex, '', contents)
 
-    config = config + '        exit\n\
+        config = config + '        exit\n\
     exit\n'
 
-    try:
-        with open('temp_' + device + '.cfg', 'r+') as sf:
-            contents = sf.read()
         contents = re.sub(r'(echo "Port Configuration"\n#\-.*\n)', r'\g<1>' + port_config, contents)
         contents = re.sub(r'(echo "System Satellite phase 2 Configuration"\n)', config + r'\g<1>', contents)
         with open('temp_' + device + '.cfg', 'w') as df:
