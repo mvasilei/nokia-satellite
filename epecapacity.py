@@ -78,9 +78,10 @@ def replace_mda(master, src, dst, cfg, device):
                     removed_cards.add(str(epe.cell_value(i, 5).split()[4]))
                 elif epe.cell_value(i, 16) == 'Yes' and int(epe.cell_value(i, 4)) == int(slot) and \
                         'Daughter' in epe.cell_value(i, 5):
+                    # if swapped and daughtercard
                     mda = epe.cell_value(i, 5).split()[4]
                     regex = re.compile(r'\s{4}port\s' + re.escape(str(mda)) + r'\/([1][1-9]|[2-9][0-9])[\s\S]+?\s{4}exit',
-                                       re.MULTILINE)
+                                       re.MULTILINE) # match interfaces that are over x/x/11 and delete the config
                     contents = re.sub(regex, '', contents)
                     regex = re.compile(r'.*port\s' + re.escape(str(mda)) + r'\/([1][1-9]|[2-9][0-9])+?')
                     contents = re.sub(regex, '', contents)
@@ -90,27 +91,6 @@ def replace_mda(master, src, dst, cfg, device):
     tmp.close()
 
     return removed_cards
-
-def swapped(card, device):
-    try:
-        with open('temp_' + device + '.cfg', 'r+') as sf:
-            contents = sf.read()
-
-            for slot in card:
-                # delete ports from config that are of the removed card and aren't migrated
-                if '/' in slot:
-                    regex = re.compile(r'\s{4}port\s' + re.escape(str(slot)) + r'\/.+[\s\S]*?^\s{4}exit',
-                                       re.MULTILINE)
-                else:
-                    regex = re.compile(r'\s{4}port\s' + re.escape(str(slot)) + r'\/.+\/.+[\s\S]*?^\s{4}exit',
-                                   re.MULTILINE)
-                contents = re.sub(regex, '', contents)
-
-        with open('temp_' + device + '.cfg', 'w') as df:
-            df.write(contents)
-    except IOError as e:
-        print('Operation failed:' + e.strerror)
-        exit()
 
 def delete_unused_ports(card, device):
     try:
@@ -397,7 +377,7 @@ def esat_uplinks(device, master):
 
         contents = re.sub(r'(echo "Port Configuration"\n#\-.*\n)', r'\g<1>' + port_config, contents)
         contents = re.sub(r'(echo "System Satellite phase 2 Configuration"\n)', config + r'\g<1>', contents)
-        with open('temp_' + device + '.cfg', 'w') as df:
+        with open(device + '_R20.cfg', 'w') as df:
             df.write(contents)
     except IOError as e:
         print('Operation failed:' + e.strerror)
