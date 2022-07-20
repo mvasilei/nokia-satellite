@@ -59,7 +59,6 @@ def replace_mda(master, src, dst, cfg, device):
     # If the daughercard is IMM P1 x 100GE CFP then do not remove the config (for the time being until iom5 confirmed)
     for i in range(epe.nrows):
         if epe.cell_value(i, 1).upper() == device.upper():
-            #for slot in card:
             if epe.cell_value(i, 16) != 'Yes' and ('Daughter' not in epe.cell_value(i, 5) and \
                                                    'SFM' not in epe.cell_value(i, 5)) and \
                     epe.cell_value(i, 17) != '':
@@ -97,7 +96,6 @@ def shutmda(match, mappings):
 
 def delete_unused_config(card, device):
     # Delete configuration for unused ports and shutdown mda slots that are removed from the chassis
-    print card
     try:
         with open('temp_' + device + '.cfg', 'r+') as sf:
             contents = sf.read()
@@ -116,9 +114,13 @@ def delete_unused_config(card, device):
                                    re.MULTILINE)
                 contents = re.sub(regex, '', contents)
 
-                #delete saps that refer those ports
-                regex = re.compile(r'\s{16}sap\s' + re.escape(slot.split('/')[0]) + r'[\s\S]+?^\s{16}exit',
+                # delete saps that refer those ports
+                regex = re.compile(r'\s{16}sap\s' + re.escape(str(slot)) + r'[\s\S]+?^\s{16}exit',
                                        re.MULTILINE)
+                contents = re.sub(regex, '', contents)
+
+                # remove reference from multiservice site
+                regex = re.compile(r'assignment\sport\s' + re.escape(str(slot)) + r'.*')
                 contents = re.sub(regex, '', contents)
 
         with open('temp_' + device + '.cfg', 'w') as df:
