@@ -17,12 +17,11 @@ def read_from_mirgation_book(filename):
 
 def matched(matched, mappings):
     regex = r'\d+\/\d+\/\d+'
-    if 'multi-service-site' in matched.group():
+    if 'multi-service-site' not in matched.group():
+        return re.sub(regex, mappings, matched.group())
+    else:
         name = 'e' + mappings.split('-')[1]
         return re.sub(regex, name, matched.group())
-    else:
-        return re.sub(regex, mappings, matched.group())
-
 
 def port_to_esat(master, src, dst, cfg, device):
     sf = open(cfg, 'r')
@@ -96,8 +95,8 @@ def replace_mda(master, device):
                     elif epe.cell_value(i, 16) == 'Yes' and 'Daughter' in epe.cell_value(i, 5):
                         # if swapped and daughtercard
                         mda = epe.cell_value(i, 5).split()[4]
-                        regex = re.compile(r'\s{4}port\s' + re.escape(str(mda)) + r'\/([1][1-9]|[2-9][0-9])[\s\S]+?\s{4}exit',
-                                           re.MULTILINE) # match interfaces that are over x/x/11 and delete the config
+                        regex = re.compile(r'\s{4}port\s' + re.escape(str(mda)) + r'\/([1][1-9]|[2-9][0-9])[\s\S]+?^\s{4}exit',
+                                           re.MULTILINE) # match interfaces that are over x/x/10 and delete the config
                         contents = re.sub(regex, '', contents)
                         regex = re.compile(r'.*port\s' + re.escape(str(mda)) + r'\/([1][1-9]|[2-9][0-9])+?')
                         contents = re.sub(regex, '', contents)
@@ -135,7 +134,10 @@ def delete_unused_config(card, device):
                 contents = re.sub(regex, '', contents)
 
                 # delete saps that refer those ports
-                regex = re.compile(r'\s{16}sap\s' + re.escape(str(slot)) + r'[\s\S]+?^\s{16}exit',
+                regex = re.compile(r'^\s{16}sap\s' + re.escape(str(slot)) + r'[\s\S]+?^\s{16}exit',
+                                       re.MULTILINE)
+                contents = re.sub(regex, '', contents)
+                regex = re.compile(r'^\s{12}sap\s' + re.escape(str(slot)) + r'[\s\S]+?^\s{12}exit',
                                        re.MULTILINE)
                 contents = re.sub(regex, '', contents)
 
@@ -502,20 +504,34 @@ def main():
     optical_src, electrical_src, optical_dst, electrical_dst = read_from_mirgation_book(options.file)
     original_cfg = '/curr/' + options.device.lower() + '.cfg'
 
+    print('Migrating Optical ports to e-sat')
     port_to_esat(options.master, optical_src, optical_dst, original_cfg, options.device)
+    print('Migrating Electrial ports to e-sat')
     port_to_esat(options.master, electrical_src, electrical_dst, 'temp_' + options.device + '.cfg', options.device)
+    print('Shutting unused cards and MDAs')
     mda = replace_mda(options.master, options.device)
+    print('Removing configuration for ports that aren''t migrating')
     delete_unused_config(mda, options.device)
+    print('Adding software repository')
     add_soft_repo(options.device)
+    print('Applying fix for bfd')
     fix_bfd(options.device)
+    print('Applying fix for slope and mtu')
     fix_slope_mtu(options.device)
+    print('Removing share queueing from esat interfaces')
     fix_share_queueing(options.device)
     fix_authentication_key(options.device)
+    print('Adding local user')
     local_user(options.device)
+    print('Configuring new SFM (if replaced)')
     sfm(options.device, options.master)
+    print('Removing service name configuration')
     remove_service_name(options.device)
+    print('Initialising satellite MACs')
     esat_init(options.device, options.master)
+    print('Applying sync-e template')
     esat_synce(options.device, options.master)
+    print('Configuring satellite uplinks')
     esat_uplinks(options.device, options.master)
 
 if __name__ == '__main__':
