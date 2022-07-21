@@ -15,10 +15,16 @@ def read_from_mirgation_book(filename):
     return optical.col_slice(0), electrical.col_slice(0), \
            optical.col_slice(1), electrical.col_slice(1)
 
-def replace_mda(master, src, dst, cfg, device):
-    # read device config file and replace the mda interface with the esat equivalent from the migration spreadsheet
-    removed_cards = set()
+def matched(matched, mappings):
+    regex = r'\d+\/\d+\/\d+'
+    if 'multi-service-site' in matched.group():
+        name = 'e' + mappings.split('-')[1]
+        return re.sub(regex, name, matched.group())
+    else:
+        return re.sub(regex, mappings, matched.group())
 
+
+def port_to_esat(master, src, dst, cfg, device):
     sf = open(cfg, 'r')
     contents = sf.read()
     sf.close()
@@ -28,7 +34,15 @@ def replace_mda(master, src, dst, cfg, device):
         source = src[i].value
         destination = dst[i].value
         if source != '':
-            contents = re.sub(re.escape(source)+r'(?=[^\d])', destination, contents)
+            contents = re.sub(r'.*' + re.escape(source)+r'(?=[^\d]).*', partial(matched, mappings = destination), contents)
+
+    tmp = open('temp_' + device + '.cfg', 'w+')
+    tmp.write(contents)
+    tmp.close()
+
+def replace_mda(master, device):
+    # read device config file and replace the mda interface with the esat equivalent from the migration spreadsheet
+    removed_cards = set()
 
     book = xlrd.open_workbook(master)
     epe = book.sheet_by_name('EPE_SlotReport16072021')
@@ -57,36 +71,42 @@ def replace_mda(master, src, dst, cfg, device):
     # cards for which you can remove reference to port configuration.
     # If the card is swapped with 2-PAC FP3 IMM then add the configuration to provision the new HW
     # If the daughercard is IMM P1 x 100GE CFP then do not remove the config (for the time being until iom5 confirmed)
-    for i in range(epe.nrows):
-        if epe.cell_value(i, 1).upper() == device.upper():
-            if epe.cell_value(i, 16) != 'Yes' and ('Daughter' not in epe.cell_value(i, 5) and \
-                                                   'SFM' not in epe.cell_value(i, 5)) and \
-                    epe.cell_value(i, 17) != '':
-                card = str(int(epe.cell_value(i, 4)))
-                regex = re.compile(r'(?<=\s{4}card\s' + re.escape(card) + r')[\s\S]+?(?=^\s{4}exit)',
-                                   re.MULTILINE)
-                contents = re.sub(regex, r'\n        shutdown\n', contents)
-                removed_cards.update(card)
-            elif epe.cell_value(i, 16) == 'Yes' and '2-PAC FP3 IMM' in epe.cell_value(i, 15):
-                card = str(int(epe.cell_value(i, 4)))
-                regex = re.compile(r'(?<=\s{4}card\s' + re.escape(card) + r')[\s\S]+?(?=^\s{4}exit)',
-                                   re.MULTILINE)
-                contents = re.sub(regex, card_config, contents)
-            elif epe.cell_value(i, 16) != 'Yes' and 'Daughter' in epe.cell_value(i, 5) and epe.cell_value(i, 17) != ''\
-                    and epe.cell_value(i, 17) != 'IMM P1 x 100GE CFP':
-                removed_cards.add(str(epe.cell_value(i, 5).split()[4]))
-            elif epe.cell_value(i, 16) == 'Yes' and 'Daughter' in epe.cell_value(i, 5):
-                # if swapped and daughtercard
-                mda = epe.cell_value(i, 5).split()[4]
-                regex = re.compile(r'\s{4}port\s' + re.escape(str(mda)) + r'\/([1][1-9]|[2-9][0-9])[\s\S]+?\s{4}exit',
-                                   re.MULTILINE) # match interfaces that are over x/x/11 and delete the config
-                contents = re.sub(regex, '', contents)
-                regex = re.compile(r'.*port\s' + re.escape(str(mda)) + r'\/([1][1-9]|[2-9][0-9])+?')
-                contents = re.sub(regex, '', contents)
+    try:
+        with open('temp_' + device + '.cfg', 'r+') as sf:
+            contents = sf.read()
 
-    tmp = open('temp_' + device + '.cfg', 'w+')
-    tmp.write(contents)
-    tmp.close()
+            for i in range(epe.nrows):
+                if epe.cell_value(i, 1).upper() == device.upper():
+                    if epe.cell_value(i, 16) != 'Yes' and ('Daughter' not in epe.cell_value(i, 5) and \
+                                                           'SFM' not in epe.cell_value(i, 5)) and \
+                            epe.cell_value(i, 17) != '':
+                        card = str(int(epe.cell_value(i, 4)))
+                        regex = re.compile(r'(?<=\s{4}card\s' + re.escape(card) + r')[\s\S]+?(?=^\s{4}exit)',
+                                           re.MULTILINE)
+                        contents = re.sub(regex, r'\n        shutdown\n', contents)
+                        removed_cards.update(card)
+                    elif epe.cell_value(i, 16) == 'Yes' and '2-PAC FP3 IMM' in epe.cell_value(i, 15):
+                        card = str(int(epe.cell_value(i, 4)))
+                        regex = re.compile(r'(?<=\s{4}card\s' + re.escape(card) + r')[\s\S]+?(?=^\s{4}exit)',
+                                           re.MULTILINE)
+                        contents = re.sub(regex, card_config, contents)
+                    elif epe.cell_value(i, 16) != 'Yes' and 'Daughter' in epe.cell_value(i, 5) and epe.cell_value(i, 17) != ''\
+                            and epe.cell_value(i, 17) != 'IMM P1 x 100GE CFP':
+                        removed_cards.add(str(epe.cell_value(i, 5).split()[4]))
+                    elif epe.cell_value(i, 16) == 'Yes' and 'Daughter' in epe.cell_value(i, 5):
+                        # if swapped and daughtercard
+                        mda = epe.cell_value(i, 5).split()[4]
+                        regex = re.compile(r'\s{4}port\s' + re.escape(str(mda)) + r'\/([1][1-9]|[2-9][0-9])[\s\S]+?\s{4}exit',
+                                           re.MULTILINE) # match interfaces that are over x/x/11 and delete the config
+                        contents = re.sub(regex, '', contents)
+                        regex = re.compile(r'.*port\s' + re.escape(str(mda)) + r'\/([1][1-9]|[2-9][0-9])+?')
+                        contents = re.sub(regex, '', contents)
+
+        with open('temp_' + device + '.cfg', 'w') as df:
+            df.write(contents)
+    except IOError as e:
+        print('Operation failed:' + e.strerror)
+        exit()
 
     return removed_cards
 
@@ -395,6 +415,7 @@ def esat_uplinks(device, master):
         contents = re.sub(r'(echo "System Satellite phase 2 Configuration"\n)', config + r'\g<1>', contents)
         with open(device + '_R20.cfg', 'w') as df:
             df.write(contents)
+            print ('Config file created in ' + (device) + '_R20.cfg')
     except IOError as e:
         print('Operation failed:' + e.strerror)
         exit()
@@ -481,8 +502,9 @@ def main():
     optical_src, electrical_src, optical_dst, electrical_dst = read_from_mirgation_book(options.file)
     original_cfg = '/curr/' + options.device.lower() + '.cfg'
 
-    mda = replace_mda(options.master, optical_src, optical_dst, original_cfg, options.device)
-    mda.update(replace_mda(options.master, electrical_src, electrical_dst, 'temp_' + options.device + '.cfg', options.device))
+    port_to_esat(options.master, optical_src, optical_dst, original_cfg, options.device)
+    port_to_esat(options.master, electrical_src, electrical_dst, 'temp_' + options.device + '.cfg', options.device)
+    mda = replace_mda(options.master, options.device)
     delete_unused_config(mda, options.device)
     add_soft_repo(options.device)
     fix_bfd(options.device)
