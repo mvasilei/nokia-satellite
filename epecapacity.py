@@ -44,7 +44,7 @@ def replace_mda(master, device):
     removed_cards = set()
 
     book = xlrd.open_workbook(master)
-    epe = book.sheet_by_name('EPE_SlotReport16072021')
+    epe = book.sheet_by_name('EPE_SlotReport')
 
     card_config = '\n        card-type imm-2pac-fp3\n\
         mda 1\n\
@@ -461,7 +461,7 @@ def esat_init(device, master):
 
 def sfm(device, master):
     book = xlrd.open_workbook(master)
-    epe = book.sheet_by_name('EPE_SlotReport16072021')
+    epe = book.sheet_by_name('EPE_SlotReport')
 
     for i in range(epe.nrows):
         if epe.cell_value(i, 1).upper() == device.upper():
