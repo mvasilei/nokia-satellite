@@ -506,7 +506,7 @@ def main():
 
     print('Migrating Optical ports to e-sat')
     port_to_esat(options.master, optical_src, optical_dst, original_cfg, options.device)
-    print('Migrating Electrial ports to e-sat')
+    print('Migrating Electrical ports to e-sat')
     port_to_esat(options.master, electrical_src, electrical_dst, 'temp_' + options.device + '.cfg', options.device)
     print('Shutting unused cards and MDAs')
     mda = replace_mda(options.master, options.device)
