@@ -129,7 +129,7 @@ def delete_unused_config(card, device):
                     regex = re.compile(r'\s{4}port\s' + re.escape(str(slot)) + r'\/.+[\s\S]*?^\s{4}exit',
                                        re.MULTILINE)
                 else:
-                    regex = re.compile(r'\s{4}port\s' + re.escape(str(slot)) + r'\/.+\/.+[\s\S]*?^\s{4}exit',
+                    regex = re.compile(r'^\s{4}port\s' + re.escape(str(slot)) + r'\/.+\/.+[\s\S]*?^\s{4}exit',
                                    re.MULTILINE)
                 contents = re.sub(regex, '', contents)
 
@@ -433,7 +433,8 @@ def esat_init(device, master):
         satellite\n'
     for i in range(sheet.nrows):
         if sheet.cell_value(i, 0).upper() == device.upper():
-            for j in range(13,18):
+            satellite_count = int(sheet.cell_value(i, 6))
+            for j in range(13,13+satellite_count):
                 if sheet.cell_value(i, j) != '':
                     config += '            eth-sat ' + str(count) + ' create\n\
                 description "Ethernet Satellite"\n\
@@ -442,7 +443,15 @@ def esat_init(device, master):
                 software-repository "7210-SAS-Sx-TiMOS-20.9.R3"\n\
                 no shutdown\n\
             exit\n'
-                    count += 1
+                else:
+                    config += '            eth-sat ' + str(count) + ' create\n\
+                description "Ethernet Satellite"\n\
+                mac-address FF:FF:FF:FF:FF:FF\n\
+                sat-type "es48-1gb-sfp"\n\
+                software-repository "7210-SAS-Sx-TiMOS-20.9.R3"\n\
+                no shutdown\n\
+            exit\n'
+                count += 1
 
     config += '        exit\n\
     exit\n\
