@@ -83,7 +83,7 @@ def replace_mda(master, device):
                         regex = re.compile(r'(?<=\s{4}card\s' + re.escape(card) + r')[\s\S]+?(?=^\s{4}exit)',
                                            re.MULTILINE)
                         contents = re.sub(regex, r'\n        shutdown\n', contents)
-                        removed_cards.update(card)
+                        removed_cards.add(card)
                     elif epe.cell_value(i, 16) == 'Yes' and '2-PAC FP3 IMM' in epe.cell_value(i, 15):
                         card = str(int(epe.cell_value(i, 4)))
                         regex = re.compile(r'(?<=\s{4}card\s' + re.escape(card) + r')[\s\S]+?(?=^\s{4}exit)',
