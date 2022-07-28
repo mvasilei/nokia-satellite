@@ -276,6 +276,10 @@ def add_soft_repo(device):
         with open('temp_' + device + '.cfg', 'r+') as sf:
             contents = sf.read()
 
+        if 'software-repository "7210-SAS-Sx-TiMOS-20.9.R3" create' in contents:
+            return None
+
+        print('Adding software repository')
         regex = re.compile(r'(^\s{8}snmp\n[\s\S]+?^\s{8}exit)', re.MULTILINE)
         contents = re.sub(regex, config, contents)
 
@@ -295,18 +299,25 @@ def esat_synce(device, master):
     satellite_set = set()
     book = xlrd.open_workbook(master)
     satellite_uplinks = book.sheet_by_name('Circuit References')
+    try:
+        with open('temp_' + device + '.cfg', 'r+') as sf:
+            contents = sf.read()
 
-    for i in range(satellite_uplinks.nrows):
-        if satellite_uplinks.cell_value(i, 0).upper() == device.upper():
-            satellite_set.update(satellite_uplinks.cell_value(i, 2).split('-')[1])
+        if 'echo "System Satellite phase 2 Configuration"' in contents:
+            print('Skipping satellite sync-e configuration. Config already in place...')
+            return None
 
-    config = 'echo "System Satellite phase 2 Configuration"\n\
+        for i in range(satellite_uplinks.nrows):
+            if satellite_uplinks.cell_value(i, 0).upper() == device.upper():
+                satellite_set.update(satellite_uplinks.cell_value(i, 2).split('-')[1])
+
+        config = 'echo "System Satellite phase 2 Configuration"\n\
 #--------------------------------------------------\n\
     system\n\
         satellite\n'
 
-    for satellite in satellite_set:
-        config +='            eth-sat ' + satellite + '\n\
+        for satellite in satellite_set:
+            config +='            eth-sat ' + satellite + '\n\
                 sync-e\n\
                 port-map esat-' + satellite + '/1/1 primary esat-' + satellite + '/1/u1 secondary esat-' + satellite + '/1/u2\n\
                 port-map esat-' + satellite + '/1/2 primary esat-' + satellite + '/1/u1 secondary esat-' + satellite + '/1/u2\n\
@@ -358,14 +369,11 @@ def esat_synce(device, master):
                 port-map esat-' + satellite + '/1/48 primary esat-' + satellite + '/1/u2 secondary esat-' + satellite + '/1/u1\n\
             exit\n'
 
-    config += '        exit\n\
+        config += '        exit\n\
     exit\n\
 #--------------------------------------------------\n'
 
-    try:
-        with open('temp_' + device + '.cfg', 'r+') as sf:
-            contents = sf.read()
-
+        print('Applying sync-e template')
         contents = re.sub(r'(echo \"Port Configuration\"\n)', config + r'\g<1>', contents)
         with open('temp_' + device + '.cfg', 'w') as df:
             df.write(contents)
@@ -386,6 +394,14 @@ def esat_uplinks(device, master):
         with open('temp_' + device + '.cfg', 'r+') as sf:
             contents = sf.read()
 
+        if 'echo "System Port-Topology Configuration"' in contents:
+            print('Skipping satellite uplink configuration. Config already in place...')
+            with open(device + '_R20.cfg', 'w') as df:
+                df.write(contents)
+                print('Config file created in ' + (device) + '_R20.cfg')
+            return None
+
+        print('Configuring satellite uplinks')
         for i in range(satellite_uplinks.nrows):
             if satellite_uplinks.cell_value(i, 0).upper() == device.upper():
                 mdaport = str(satellite_uplinks.cell_value(i, 1)).lower()
@@ -427,39 +443,44 @@ def esat_init(device, master):
     sheet = book.sheet_by_name('PE List')
     count = 1
 
-    config = 'echo "System Satellite phase 1 Configuration"\n\
+    try:
+        with open('temp_' + device + '.cfg', 'r+') as sf:
+            contents = sf.read()
+        if 'echo "System Satellite phase 1 Configuration"' in contents:
+            print('Skipping satellite MAC initialisation. Config already in place...')
+            return None
+
+        print('Initialising satellite MACs')
+
+        config = 'echo "System Satellite phase 1 Configuration"\n\
 #--------------------------------------------------\n\
     system\n\
         satellite\n'
-    for i in range(sheet.nrows):
-        if sheet.cell_value(i, 0).upper() == device.upper():
-            satellite_count = int(sheet.cell_value(i, 6))
-            for j in range(13,13+satellite_count):
-                if sheet.cell_value(i, j) != '':
-                    config += '            eth-sat ' + str(count) + ' create\n\
+        for i in range(sheet.nrows):
+            if sheet.cell_value(i, 0).upper() == device.upper():
+                satellite_count = int(sheet.cell_value(i, 6))
+                for j in range(13,13+satellite_count):
+                    if sheet.cell_value(i, j) != '':
+                        config += '            eth-sat ' + str(count) + ' create\n\
                 description "Ethernet Satellite"\n\
                 mac-address ' + str(sheet.cell_value(i, j)) +'\n\
                 sat-type "es48-1gb-sfp"\n\
                 software-repository "7210-SAS-Sx-TiMOS-20.9.R3"\n\
                 no shutdown\n\
             exit\n'
-                else:
-                    config += '            eth-sat ' + str(count) + ' create\n\
+                    else:
+                        config += '            eth-sat ' + str(count) + ' create\n\
                 description "Ethernet Satellite"\n\
                 mac-address FF:FF:FF:FF:FF:FF\n\
                 sat-type "es48-1gb-sfp"\n\
                 software-repository "7210-SAS-Sx-TiMOS-20.9.R3"\n\
                 no shutdown\n\
             exit\n'
-                count += 1
+                    count += 1
 
-    config += '        exit\n\
+        config += '        exit\n\
     exit\n\
 #--------------------------------------------------\n'
-
-    try:
-        with open('temp_' + device + '.cfg', 'r+') as sf:
-            contents = sf.read()
 
         contents = re.sub(r'(echo \"System Security Configuration\"\n)', config + r'\g<1>', contents)
         with open('temp_' + device + '.cfg', 'w') as df:
@@ -521,7 +542,6 @@ def main():
     mda = replace_mda(options.master, options.device)
     print('Removing configuration for ports that aren''t migrating')
     delete_unused_config(mda, options.device)
-    print('Adding software repository')
     add_soft_repo(options.device)
     print('Applying fix for bfd')
     fix_bfd(options.device)
@@ -536,11 +556,8 @@ def main():
     sfm(options.device, options.master)
     print('Removing service name configuration')
     remove_service_name(options.device)
-    print('Initialising satellite MACs')
     esat_init(options.device, options.master)
-    print('Applying sync-e template')
     esat_synce(options.device, options.master)
-    print('Configuring satellite uplinks')
     esat_uplinks(options.device, options.master)
 
 if __name__ == '__main__':
