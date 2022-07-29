@@ -30,8 +30,8 @@ def port_to_esat(master, src, dst, cfg, device):
 
     # replace mda port from migration xls to its esat equivalent
     for i in range(1, len(src)):
-        source = src[i].value
-        destination = dst[i].value
+        source = src[i].value.strip()
+        destination = dst[i].value.strip()
         if source != '':
             contents = re.sub(r'.*' + re.escape(source)+r'(?=[^\d]).*', partial(matched, mappings = destination), contents)
 
