@@ -133,6 +133,11 @@ def delete_unused_config(card, device):
                                    re.MULTILINE)
                 contents = re.sub(regex, '', contents)
 
+                # delete bundle-ppp ports
+                regex = re.compile(r'^\s{4}port\sbundle-ppp-' + re.escape(str(slot)) + r'[\s\S]+?^\s{4}exit',
+                                       re.MULTILINE)
+                contents = re.sub(regex, '', contents)
+
                 # delete saps that refer those ports
                 regex = re.compile(r'^\s{16}sap\s' + re.escape(str(slot)) + r'[\s\S]+?^\s{16}exit',
                                        re.MULTILINE)
@@ -529,6 +534,12 @@ def main():
         print('All options are compulsory')
         parser.print_help()
         exit()
+
+    print ('Retrieving latest device config for ' + options.device.lower())
+    result = subprocess.call(
+        ['getcfg ' + options.device.lower()],
+        stdout=subprocess.PIPE,
+        shell=True)
 
     print('Working on creating configuration file please hold...')
     optical_src, electrical_src, optical_dst, electrical_dst = read_from_mirgation_book(options.file)
