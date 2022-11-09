@@ -16,7 +16,7 @@ def read_from_mirgation_book(filename):
            optical.col_slice(1), electrical.col_slice(1)
 
 def matched(matched, mappings):
-    regex = r'\d+\/\d+\/\d+'
+    regex = r'(?<![A-Za-z#])\d+\/\d+\/\d+'
     if 'multi-service-site' not in matched.group():
         return re.sub(regex, mappings, matched.group())
     else:
