@@ -17,11 +17,14 @@ def read_from_mirgation_book(filename):
 
 def matched(matched, mappings):
     regex = r'(?<![A-Za-z#])\d+\/\d+\/\d+'
-    if 'multi-service-site' not in matched.group():
-        return re.sub(regex, mappings, matched.group())
+    if 'esat' not in matched.group():
+        if 'multi-service-site' not in matched.group():
+            return re.sub(regex, mappings, matched.group())
+        else:
+            name = 'e' + mappings.split('-')[1]
+            return re.sub(regex, name, matched.group())
     else:
-        name = 'e' + mappings.split('-')[1]
-        return re.sub(regex, name, matched.group())
+        return matched.group()
 
 def port_to_esat(master, src, dst, cfg, device):
     sf = open(cfg, 'r')
