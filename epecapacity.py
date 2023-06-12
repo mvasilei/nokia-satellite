@@ -416,8 +416,8 @@ def esat_uplinks(device, master):
                 esat_ulink = str(satellite_uplinks.cell_value(i, 3)).lower()
                 config = config + '            ' + mdaport + ' to ' + esat_ulink + ' create\n'
                 port_config += '    ' + str(satellite_uplinks.cell_value(i, 1)).lower() + '\n\
-        description "vf=4445:dt=bb:bw=10G:ph=10GE:st=act:tl=#VF#' + satellite_uplinks.cell_value(i, 4).encode().upper() + 'di='\
-                           + device + '-' + satellite_uplinks.cell_value(i, 2) +'#' + satellite_uplinks.cell_value(i, 3) + '"\n\
+        description "vf=4445:dt=bb:bw=10G:ph=10GE:st=act:tl=#VF#' + satellite_uplinks.cell_value(i, 4).encode('utf-8').upper() + 'di='\
+                           + device + '-' + satellite_uplinks.cell_value(i, 2).encode('utf-8') +'#' + satellite_uplinks.cell_value(i, 3).encode('utf-8') + '"\n\
         ethernet\n\
             dot1x\n\
                 tunneling\n\
