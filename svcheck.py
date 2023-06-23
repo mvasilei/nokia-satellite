@@ -7,17 +7,20 @@ def signal_handler(sig, frame):
     sys.exit()
 
 def vprn_lookup(vprn_id, worksheet):
-    policy_regex = re.compile(r'vrf-[ei][mx]port.*', re.MULTILINE)
-    row = 0
+    policy_regex = re.compile(r'vrf-[ei][mx]port.*', re.MULTILINE) #match import export policies
+    vprn_regex = re.compile(r'(^\s{8}vprn\s' + re.escape(vprn_id) + '\s(\n|.)*?^\s{8}exit)', re.MULTILINE) #match entire vprn configuration
+    bgp_group_regex = re.compile(r'^\s{12}bgp(\n|.)*?^\s{12}exit', re.MULTILINE) #match entire bgp configuration
+    row = 1
+
     result = subprocess.Popen(
         ['rlist alcatel'],
         stdout=subprocess.PIPE,
         shell=True)
     output = result.stdout.read().split('\n')
-    vprn_regex = re.compile(r'(^\s{8}vprn\s' + re.escape(vprn_id) + '.*(\n|.)*?exit)', re.MULTILINE) #(^\s{8}vprn\s' + re.escape(vprn_id) + '.*(\n|.)*?\s{8}exit)
+
     for line in output:
-        device = line.split(':')[0].strip().lower()
-        if os.path.exists('/curr/' + device.lower() + '.cfg'):
+        device = line.split(':')[0].strip().lower() #take output of rlist and use the host name
+        if os.path.exists('/curr/' + device.lower() + '.cfg'): #check config file exists then grep with vprn to see if relevant
             result = subprocess.Popen(
                 ['egrep "vprn ' + vprn_id + ' " /curr/' + device + '.cfg'],
                 stdout=subprocess.PIPE,
@@ -28,19 +31,30 @@ def vprn_lookup(vprn_id, worksheet):
                     config = cfg.read()
                     if vprn_id in config:
                         for match in vprn_regex.finditer(config):
-                            policy = re.findall(policy_regex, match.group(1))
-                            if policy:
-                                row += 1
+                            policies = re.findall(policy_regex, match.group(1))
+
+                            if policies:
                                 worksheet.write(row, 0, vprn_id)
                                 worksheet.write(row, 1, device)
-                                for i in range(len(policy)):
-                                    if 'import' in policy[i].split()[0]:
-                                        worksheet.write(row, i + 2, policy[i].split()[1])
+
+                                mxroutes = re.findall(r'maximum-routes.+|mc-maximum-routes.+', match.group(1))
+
+                                for mxroute in mxroutes:
+                                    if 'mc' in mxroute:
+                                        worksheet.write(row, 5, mxroute.split()[1] + '+' + mxroute.split()[3])
                                     else:
-                                        if i == 1:
-                                            worksheet.write(row, i + 2, policy[i].split()[1])
-                                        else:
-                                            worksheet.write(row, i + 3, policy[i].split()[1])
+                                        worksheet.write(row, 4, mxroute.split()[1] + '+' + mxroute.split()[4])
+
+                                for bgp in bgp_group_regex.finditer(match.group(1)):
+                                    for bgp_group in re.finditer(r'group.*', bgp.group()):
+                                        worksheet.write(row, 6, bgp_group.group().split()[1])
+
+                                for policy in policies:
+                                    if 'import' in policy:
+                                        worksheet.write(row, 2, policy.split()[1])
+                                    else:
+                                        worksheet.write(row, 3, policy.split()[1])
+                                row += 1
 
 def open_xls_to_write(svc):
     book = xlsxwriter.Workbook('EPE_SVC_'+svc+'_Policies.xlsx')
@@ -74,6 +88,9 @@ def main():
     svc_sheet.write(0, 1, 'Device')
     svc_sheet.write(0, 2, 'Import Policy')
     svc_sheet.write(0, 3, 'Export Policy')
+    svc_sheet.write(0, 4, 'Max Routes')
+    svc_sheet.write(0, 5, 'Max Multicast Routes')
+    svc_sheet.write(0, 6, 'BGP Group')
     vprn_lookup(options.svc, svc_sheet)
     book.close()
     print ('Results file ' + 'EPE_SVC_'+options.svc+'_Policies.xlsx')
