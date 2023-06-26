@@ -18,43 +18,42 @@ def vprn_lookup(vprn_id, worksheet):
         shell=True)
     output = result.stdout.read().split('\n')
 
-    for line in output:
-        device = line.split(':')[0].strip().lower() #take output of rlist and use the host name
+    for line in output: #for each entry returned from the rlist command
+        device = line.split(':')[0].strip().lower() #extract host name
         if os.path.exists('/curr/' + device.lower() + '.cfg'): #check config file exists then grep with vprn to see if relevant
             result = subprocess.Popen(
                 ['egrep "vprn ' + vprn_id + ' " /curr/' + device + '.cfg'],
                 stdout=subprocess.PIPE,
                 shell=True)
             file = result.stdout.read()
-            if file:
+            if file: #if vprn exists in the config file
                 with open('/curr/' + device.lower() + '.cfg', 'r') as cfg:
                     config = cfg.read()
-                    if vprn_id in config:
-                        for match in vprn_regex.finditer(config):
-                            policies = re.findall(policy_regex, match.group(1))
+                    for match in vprn_regex.finditer(config):
+                        policies = re.findall(policy_regex, match.group(1))
 
-                            if policies:
-                                worksheet.write(row, 0, vprn_id)
-                                worksheet.write(row, 1, device)
+                        if policies:
+                            worksheet.write(row, 0, vprn_id)
+                            worksheet.write(row, 1, device)
 
-                                mxroutes = re.findall(r'maximum-routes.+|mc-maximum-routes.+', match.group(1))
+                            mxroutes = re.findall(r'maximum-routes.+|mc-maximum-routes.+', match.group(1))
 
-                                for mxroute in mxroutes:
-                                    if 'mc' in mxroute:
-                                        worksheet.write(row, 5, mxroute.split()[1] + '+' + mxroute.split()[3])
-                                    else:
-                                        worksheet.write(row, 4, mxroute.split()[1] + '+' + mxroute.split()[4])
+                            for mxroute in mxroutes:
+                                if 'mc' in mxroute:
+                                    worksheet.write(row, 5, mxroute.split()[1] + '+' + mxroute.split()[3])
+                                else:
+                                    worksheet.write(row, 4, mxroute.split()[1] + '+' + mxroute.split()[4])
 
-                                for bgp in bgp_group_regex.finditer(match.group(1)):
-                                    for bgp_group in re.finditer(r'group.*', bgp.group()):
-                                        worksheet.write(row, 6, bgp_group.group().split()[1])
+                            for bgp in bgp_group_regex.finditer(match.group(1)):
+                                for bgp_group in re.finditer(r'group.*', bgp.group()):
+                                    worksheet.write(row, 6, bgp_group.group().split()[1])
 
-                                for policy in policies:
-                                    if 'import' in policy:
-                                        worksheet.write(row, 2, policy.split()[1])
-                                    else:
-                                        worksheet.write(row, 3, policy.split()[1])
-                                row += 1
+                            for policy in policies:
+                                if 'import' in policy:
+                                    worksheet.write(row, 2, policy.split()[1])
+                                else:
+                                    worksheet.write(row, 3, policy.split()[1])
+                            row += 1
 
 def open_xls_to_write(svc):
     book = xlsxwriter.Workbook('EPE_SVC_'+svc+'_Policies.xlsx')
@@ -94,7 +93,6 @@ def main():
     vprn_lookup(options.svc, svc_sheet)
     book.close()
     print ('Results file ' + 'EPE_SVC_'+options.svc+'_Policies.xlsx')
-
 
 if __name__ == '__main__':
     signal.signal(signal.SIGINT, signal_handler)  # catch ctrl-c and call handler to terminate the script
