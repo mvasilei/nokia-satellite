@@ -46,13 +46,13 @@ def vprn_lookup(vprn_id, worksheet):
 
                             for bgp in bgp_group_regex.finditer(match.group(1)):
                                 for bgp_group in re.finditer(r'group.*', bgp.group()):
-                                    worksheet.write(row, 6, bgp_group.group().split()[1])
+                                    worksheet.write(row, 6, bgp_group.group().split(' ',1)[-1])
 
                             for policy in policies:
                                 if 'import' in policy:
-                                    worksheet.write(row, 2, policy.split()[1])
+                                    worksheet.write(row, 2, policy.split(' ',1)[-1])
                                 else:
-                                    worksheet.write(row, 3, policy.split()[1])
+                                    worksheet.write(row, 3, policy.split(' ',1)[-1])
                             row += 1
 
 def open_xls_to_write(svc):
