@@ -36,7 +36,7 @@ def port_to_esat(master, src, dst, cfg, device):
         source = src[i].value.strip()
         destination = dst[i].value.strip()
         if source != '':
-            contents = re.sub(r'.*' + re.escape(source)+r'(?=[^\d]).*', partial(matched, mappings = destination), contents)
+            contents = re.sub(r'.*' + re.escape(source.encode('utf-8'))+r'(?=[^\d]).*', partial(matched, mappings = destination.encode('utf-8')), contents)
 
     tmp = open('temp_' + device + '.cfg', 'w+')
     tmp.write(contents)
@@ -382,7 +382,7 @@ def esat_synce(device, master):
 #--------------------------------------------------\n'
 
         print('Applying sync-e template')
-        contents = re.sub(r'(echo \"Port Configuration\"\n)', config + r'\g<1>', contents)
+        contents = re.sub(r'(echo \"Port Configuration\"\n)', config.encode('utf-8') + r'\g<1>', contents)
         with open('temp_' + device + '.cfg', 'w') as df:
             df.write(contents)
     except IOError as e:
