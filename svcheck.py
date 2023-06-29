@@ -6,14 +6,14 @@ def signal_handler(sig, frame):
     print('Exiting gracefully Ctrl-C detected...')
     sys.exit()
 
-def vprn_lookup(vprn_id, csvwriter):
+def vprn_lookup(vprn_id, csvwriter, rlist_group):
     policy_regex = re.compile(r'vrf-[ei][mx]port.*', re.MULTILINE) #match import export policies
     vprn_regex = re.compile(r'(^\s{8}vprn\s' + re.escape(vprn_id) + '\s(\n|.)*?^\s{8}exit)', re.MULTILINE) #match entire vprn configuration
     bgp_group_regex = re.compile(r'^\s{12}bgp(\n|.)*?^\s{12}exit', re.MULTILINE) #match entire bgp configuration
     row = 1
 
     result = subprocess.Popen(
-        ['rlist alcatel'],
+        ['rlist ' + rlist_group],
         stdout=subprocess.PIPE,
         shell=True)
     output = result.stdout.read().split('\n')
@@ -58,7 +58,6 @@ def vprn_lookup(vprn_id, csvwriter):
                                     export_policy = policy.split(' ',1)[-1]
 
                             csvwriter.writerow([vprn_id, device, import_policy, export_policy, mx_routes, mc_mx_routes, bgp_policy])
-                            row += 1
 
 def main():
     usage = 'usage: %prog options'
@@ -81,13 +80,14 @@ def main():
     except ValueError:
         print("The Service ID provided doesn't have the correct format")
 
-    with open('EPE_SVC_'+options.svc+'_Policies.csv', 'w') as csvfile:
+    with open('EPE_RA_SVC_'+options.svc+'_Policies.csv', 'w') as csvfile:
         csvwriter = csv.writer(csvfile, delimiter=',',
                                quotechar='|')
         csvwriter.writerow(['Service ID', 'Device', 'Import Policy', 'Export Policy', 'Max Routes',
                             'Max Multicast Routes', 'BGP Group'])
-        vprn_lookup(options.svc, csvwriter)
-        print ('Results file ' + 'EPE_SVC_'+options.svc+'_Policies.csv')
+        vprn_lookup(options.svc, csvwriter,'alcatel')
+        vprn_lookup(options.svc, csvwriter,'UKI-RA')
+        print ('Results file ' + 'EPE_RA_SVC_'+options.svc+'_Policies.csv')
 
 if __name__ == '__main__':
     signal.signal(signal.SIGINT, signal_handler)  # catch ctrl-c and call handler to terminate the script
